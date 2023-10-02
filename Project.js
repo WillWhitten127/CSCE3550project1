@@ -1,163 +1,76 @@
+const crypto = require('crypto');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const jwksRSA = require('jwks-rsa');
-const bodyParser = require('body-parser');
 
 const app = express();
-const port = 3000;
+const port = 8080;
 
-app.use(bodyParser.json());
-
-let expiredKeyPair = null; // Store the last key that expired
-
-// Generate a new RSA key pair with unique 'kid'
+// Generate a new RSA key pair for signing JWTs
 function generateKeyPair() {
-    const keyPair = jwksRSA.generateSync('RSA', 2048);
-    keyPair.kid = Date.now().toString();  // Unique identifier using timestamp
-    return keyPair;
+    return crypto.generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: {
+            type: 'pkcs1',
+            format: 'pem'
+        },
+        privateKeyEncoding: {
+            type: 'pkcs1',
+            format: 'pem'
+        }
+    });
 }
 
 let currentKeyPair = generateKeyPair();
+
+// Set an expiration time for the key (e.g. 24 hours)
 let keyExpirationTime = Date.now() + 24 * 60 * 60 * 1000;
 
-app.get('/jwks', (req, res) => {
-    if (Date.now() > keyExpirationTime) {
-        expiredKeyPair = currentKeyPair;
-        currentKeyPair = generateKeyPair();
-        keyExpirationTime = Date.now() + 24 * 60 * 60 * 1000;
-    }
+app.use(express.json()); // To parse JSON requests
 
+// Define the JWKS route for retrieving the public keys with unique identifiers
+app.get('/jwks', (req, res) => {
+    const jwk = jwksRSA.createPublicKey(currentKeyPair.publicKey).toJWK();
     res.json({
-        keys: [{
-            alg: 'RS256',
-            kty: 'RSA',
-            use: 'sig',
-            n: currentKeyPair.rsaPublicKey.n.toString('base64'),
-            e: currentKeyPair.rsaPublicKey.e.toString('base64'),
-            kid: currentKeyPair.kid
-        }]
+        keys: [jwk]
     });
 });
 
+// Define the authentication route for verifying credentials and issuing JWTs
 app.post('/auth', (req, res) => {
+    // Verify the user's credentials (e.g. username and password)
     const { username, password } = req.body;
-
-    let signingKey = currentKeyPair.privateKey;
-    let signingKid = currentKeyPair.kid;
-
-    if (req.query.expired && expiredKeyPair) {
-        signingKey = expiredKeyPair.privateKey;
-        signingKid = expiredKeyPair.kid;
-    }
-
     if (username === 'admin' && password === 'password') {
-        const token = jwt.sign({ sub: 'admin' }, signingKey, {
+        // Generate a new JWT using the current RSA key
+        const token = jwt.sign({ sub: 'admin' }, currentKeyPair.privateKey, {
             algorithm: 'RS256',
             expiresIn: '1h',
-            keyid: signingKid
+            keyid: 'current'
         });
         res.json({ token });
     } else {
         res.status(401).json({ error: 'Invalid credentials' });
     }
-});
 
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ error: 'Internal server error' });
-});
-
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    next();
-});
-
-app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
-});
-const express = require('express');
-const jwt = require('jsonwebtoken');
-const jwksRSA = require('jwks-rsa');
-const bodyParser = require('body-parser');
-
-const app = express();
-const port = 3000;
-
-app.use(bodyParser.json());
-let expiredKeyPair = null; // Store the last key that expired
-
-// Generate a new RSA key pair with unique 'kid'
-function generateKeyPair() {
-    const keyPair = jwksRSA.generateSync('RSA', 2048);
-    keyPair.kid = Date.now().toString();  // Unique identifier using timestamp
-    return keyPair;
-}
-
-let currentKeyPair = generateKeyPair();
-let keyExpirationTime = Date.now() + 24 * 60 * 60 * 1000;
-
-app.get('/jwks', (req, res) => {
+    // Check if the current RSA key has expired
     if (Date.now() > keyExpirationTime) {
-        expiredKeyPair = currentKeyPair;
+        // Generate a new RSA key pair and use it to sign the JWT
         currentKeyPair = generateKeyPair();
         keyExpirationTime = Date.now() + 24 * 60 * 60 * 1000;
     }
-
-    res.json({
-        keys: [{
-            alg: 'RS256',
-            kty: 'RSA',
-            use: 'sig',
-            n: currentKeyPair.rsaPublicKey.n.toString('base64'),
-            e: currentKeyPair.rsaPublicKey.e.toString('base64'),
-            kid: currentKeyPair.kid
-        }]
-    });
 });
 
-app.post('/auth', (req, res) => {
-    const { username, password } = req.body;
-
-    let signingKey = currentKeyPair.privateKey;
-    let signingKid = currentKeyPair.kid;
-
-    if (req.query.expired && expiredKeyPair) {
-        signingKey = expiredKeyPair.privateKey;
-        signingKid = expiredKeyPair.kid;
-    }
-
-    if (username === 'admin' && password === 'password') {
-        const token = jwt.sign({ sub: 'admin' }, signingKey, {
-            algorithm: 'RS256',
-            expiresIn: '1h',
-            keyid: signingKid
-        });
-        res.json({ token });
-    } else {
-        res.status(401).json({ error: 'Invalid credentials' });
-    }
-});
-
+// Add error handling and logging middleware to the server
 app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Internal server error' });
 });
-
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
     next();
 });
 
+// Start the server
 app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
 });
-/*How to run the code:
-    To run this code you will have to 
-    1. Install the dependencies using npm install
-    2. Run the server using node Project.js
-    3. Use the following curl commands to test the server
-    curl -X POST -H "Content-Type: application/json" -d '{"username":"admin","password":"password"}' http://localhost:3000/auth
-    curl -X POST -H "Content-Type: application/json" -d '{"username":"admin","password":"password"}' http://localhost:3000/auth?expired=true
-    curl http://localhost:3000/jwks
-    
-*/
