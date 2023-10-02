@@ -10,7 +10,7 @@ sudo apt install npm
 
 npm init -y
 
-npm install express jsonwebtoken jwks-rsa body-parser
+npm install express jsonwebtoken jwks-rsa
 
 Once you finsihed installing the necessary packages, you can run the sever by using the comand: "node Project1.js".
 
